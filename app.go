@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 
@@ -15,7 +16,7 @@ func (app *App) Init() {
 	app.Router = mux.NewRouter()
 
 	// Routes
-	app.Router.HandleFunc("/", test).Methods("GET")
+	app.Router.HandleFunc("/distribution", test).Methods("POST")
 }
 
 func (app *App) Run(addr string) {
@@ -23,6 +24,12 @@ func (app *App) Run(addr string) {
 }
 
 func test(w http.ResponseWriter, r *http.Request) {
-	http.Get("http://127.0.0.1:80")
-	log.Println("Test is going great")
+	var order Order
+
+	err := json.NewDecoder(r.Body).Decode(&order)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	FinishedOrders <- order
 }
