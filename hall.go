@@ -7,21 +7,27 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 )
 
-var (
+const (
 	TIME_UNIT = 250
 
 	WAITERS_NUMBER = 5
 	ORDERS_NUMBER  = 10
+	TABLES_NUMBER  = 10
+)
+
+var (
+	waitersMutex [WAITERS_NUMBER]sync.Mutex
 
 	Foods []Food
 
 	FinishedOrders = make(chan Order, 100)
 
-	Tables = make([]chan Order, 10)
+	Tables = make([]chan Order, TABLES_NUMBER)
 
 	OrderID      uint64
 	OrdersNumber int64
@@ -57,10 +63,13 @@ func main() {
 
 func waiter(id int) {
 	for {
+	FOR:
 		for i := 0; i < len(Tables); i++ {
+			waitersMutex[id].Lock()
 			select {
 			case order, ok := <-Tables[i]:
 				if ok == false {
+					waitersMutex[id].Unlock()
 					continue
 				}
 				fmt.Printf("Order %v picked by %v\n", order.ID, id)
@@ -69,8 +78,11 @@ func waiter(id int) {
 				order.WaiterID = id
 				order.PickUpTime = time.Now().UnixMilli()
 				sendOrder(order)
+				waitersMutex[id].Unlock()
+				break FOR
 			default:
 			}
+			waitersMutex[id].Unlock()
 		}
 	}
 }
@@ -95,7 +107,7 @@ L:
 				continue
 			}
 		default:
-			fmt.Printf("Order %v sent to table %v\n", order.ID, tableID)
+			fmt.Printf("Order %v on table %v\n", order.ID, tableID)
 			Tables[tableID] <- order
 			if atomic.AddInt64(&OrdersNumber, 1) >= int64(ORDERS_NUMBER) {
 				break L
@@ -126,7 +138,14 @@ func sleep(i int) {
 
 func waitForOrders() {
 	for order := range FinishedOrders {
-		Tables[order.TableID] = make(chan Order)
-		fmt.Printf("%+v\n", order)
+		go deliverOrder(order)
 	}
+}
+
+func deliverOrder(order Order) {
+	waitersMutex[order.WaiterID].Lock()
+	fmt.Println("locked to deliver")
+	Tables[order.TableID] = make(chan Order)
+	fmt.Printf("%+v\n", order)
+	waitersMutex[order.WaiterID].Unlock()
 }
