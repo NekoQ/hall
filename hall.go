@@ -16,7 +16,7 @@ const (
 	TIME_UNIT = 250
 
 	WAITERS_NUMBER = 5
-	ORDERS_NUMBER  = 10
+	ORDERS_NUMBER  = 0
 	TABLES_NUMBER  = 10
 )
 
@@ -89,28 +89,27 @@ func waiter(id int) {
 
 func sendOrder(order Order) {
 	fmt.Printf("Order %v send to the kitchen\n", order.ID)
-	url := "http://127.0.0.1:80/order"
+	url := "http://172.17.0.2:80/order"
 	jsonValue, _ := json.Marshal(order)
 	http.Post(url, "application/json", bytes.NewBuffer(jsonValue))
 }
 
 func generateOrders() {
-L:
 	for {
-		time.Sleep(time.Second * time.Duration(rand.Intn(5)))
-		order := generateOrder()
-		fmt.Printf("Order %v generated\n", order.ID)
-		tableID := rand.Intn(len(Tables))
-		select {
-		case _, ok := <-Tables[tableID]:
-			if ok == false {
-				continue
-			}
-		default:
-			fmt.Printf("Order %v on table %v\n", order.ID, tableID)
-			Tables[tableID] <- order
-			if atomic.AddInt64(&OrdersNumber, 1) >= int64(ORDERS_NUMBER) {
-				break L
+		if atomic.LoadInt64(&OrdersNumber) > 0 {
+			time.Sleep(time.Second * time.Duration(rand.Intn(5)))
+			order := generateOrder()
+			fmt.Printf("Order %v generated\n", order.ID)
+			tableID := rand.Intn(len(Tables))
+			select {
+			case _, ok := <-Tables[tableID]:
+				if ok == false {
+					continue
+				}
+			default:
+				fmt.Printf("Order %v on table %v\n", order.ID, tableID)
+				Tables[tableID] <- order
+				atomic.AddInt64(&OrdersNumber, -1)
 			}
 		}
 	}

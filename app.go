@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
+	"sync/atomic"
 
 	"github.com/gorilla/mux"
 )
@@ -17,6 +19,7 @@ func (app *App) Init() {
 
 	// Routes
 	app.Router.HandleFunc("/distribution", test).Methods("POST")
+	app.Router.HandleFunc("/generate/{number}", addOrders).Methods("POST")
 }
 
 func (app *App) Run(addr string) {
@@ -32,4 +35,11 @@ func test(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	FinishedOrders <- order
+}
+
+func addOrders(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	number, _ := strconv.Atoi(params["number"])
+	atomic.AddInt64(&OrdersNumber, int64(number))
+
 }
