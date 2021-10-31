@@ -13,7 +13,8 @@ import (
 )
 
 const (
-	TIME_UNIT = 250
+	TIME_UNIT  = 100
+	ORDER_TIME = 800
 
 	WAITERS_NUMBER = 5
 	ORDERS_NUMBER  = 0
@@ -21,6 +22,10 @@ const (
 )
 
 var (
+	TotalRating   = 0.0
+	ReviewsNumber = 0.0
+	RatingChan    = make(chan float64, 100)
+
 	waitersMutex [WAITERS_NUMBER]sync.Mutex
 
 	Foods []Food
@@ -35,8 +40,8 @@ var (
 
 func main() {
 
-	rand.Seed(time.Now().UnixNano())
 	// Prepare the data
+	rand.Seed(time.Now().UnixNano())
 	UnmarshalFood()
 
 	// Prepare the tables chans
@@ -51,6 +56,8 @@ func main() {
 
 	// Wait for finished orders
 	go waitForOrders()
+
+	go CalculateRating()
 
 	// Generate some orders
 	go generateOrders()
@@ -88,26 +95,27 @@ func waiter(id int) {
 }
 
 func sendOrder(order Order) {
-	fmt.Printf("Order %v send to the kitchen\n", order.ID)
+	fmt.Printf("Order %v sent to the kitchen\n", order.ID)
 	url := "http://172.17.0.2:80/order"
 	jsonValue, _ := json.Marshal(order)
 	http.Post(url, "application/json", bytes.NewBuffer(jsonValue))
 }
 
 func generateOrders() {
+L:
 	for {
 		if atomic.LoadInt64(&OrdersNumber) > 0 {
-			time.Sleep(time.Second * time.Duration(rand.Intn(5)))
-			order := generateOrder()
-			fmt.Printf("Order %v generated\n", order.ID)
 			tableID := rand.Intn(len(Tables))
 			select {
-			case _, ok := <-Tables[tableID]:
+			case tmp, ok := <-Tables[tableID]:
 				if ok == false {
-					continue
+					continue L
 				}
+				Tables[tableID] <- tmp
+
 			default:
-				fmt.Printf("Order %v on table %v\n", order.ID, tableID)
+				time.Sleep(time.Millisecond * ORDER_TIME)
+				order := generateOrder()
 				Tables[tableID] <- order
 				atomic.AddInt64(&OrdersNumber, -1)
 			}
@@ -132,7 +140,7 @@ func generateOrder() Order {
 }
 
 func sleep(i int) {
-	time.Sleep(time.Second * time.Duration(i))
+	time.Sleep(time.Duration(TIME_UNIT * i))
 }
 
 func waitForOrders() {
@@ -143,8 +151,38 @@ func waitForOrders() {
 
 func deliverOrder(order Order) {
 	waitersMutex[order.WaiterID].Lock()
-	fmt.Println("locked to deliver")
+	rating := getStar(order.CookingTime, order.MaxWait)
+	fmt.Printf("%v order maxWait: %v, cookingTime: %v, rating: %v\n", order.ID, order.MaxWait, order.CookingTime, rating)
+	RatingChan <- float64(rating)
 	Tables[order.TableID] = make(chan Order)
-	fmt.Printf("%+v\n", order)
 	waitersMutex[order.WaiterID].Unlock()
+}
+
+func getStar(wait float32, max int) int {
+	waitTime := float32(wait)
+	maxTime := float32(max)
+	if waitTime < maxTime {
+		return 5
+	}
+	if waitTime <= maxTime*1.1 {
+		return 4
+	}
+	if waitTime <= maxTime*1.2 {
+		return 3
+	}
+	if waitTime <= maxTime*1.3 {
+		return 2
+	}
+	if waitTime <= maxTime*1.4 {
+		return 1
+	}
+	return 0
+}
+
+func CalculateRating() {
+	for rating := range RatingChan {
+		TotalRating = (TotalRating*ReviewsNumber + rating) / (ReviewsNumber + 1)
+		fmt.Printf("Restaurant raiting: %.2f\n", TotalRating)
+		ReviewsNumber += 1
+	}
 }
